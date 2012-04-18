@@ -1,4 +1,5 @@
 (require 'objc-support)
+(require 'nsclasp)
 
 (objc:load-framework "CalendarStore" :calendarstore)
 
@@ -28,27 +29,19 @@
                 (ccl::lisp-string-from-nsstring (#/title calendar))
                 (ccl::lisp-string-from-nsstring (#/uid calendar))))))
 
-(defun icalsync-cl-all-tasks ()
-  "Return all tasks in all calendars in the default calendar store."
-  (let ((store (icalsync-cl-calendar-store))
-        (calendars (icalsync-cl-all-calendars)))
-    (#/tasksWithPredicate: store
-                           (#/taskPredicateWithUncompletedTasks: ns:cal-calendar-store calendars))))
-
 (defvar *task-properties*
   (list "title"
         "uid"
         "priority"
         "dueDate"
+        "dateStamp"
         "completedDate"))
 
-(defun icalsync-cl-task->plist (task)
-  "Convert a CalTask to a plist of properties. The list of properties
-    is described by *task-properties*."
-  (loop
-     for property in *task-properties*
-     for value = (funcall (intern property "NEXTSTEP-FUNCTIONS") task)
-     append (list (intern (format nil "~:@(~a~)" property)) (icalsync-cl-coerce-value value))))
+(defun icalsync-cl-get-task (uid)
+  (let ((task (#/taskWithUID: (icalsync-cl-calendar-store) (ccl::%make-nsstring uid))))
+    (if (%null-ptr-p task)
+        nil
+        task)))
 
 (defun icalsync-cl-coerce-value (value)
   "Convert VALUE into a native Lisp type of some kind. The conversions
@@ -60,6 +53,14 @@
     ((nsclasp:ns-date-p value)
      (nsclasp:ns-date->encoded-universal-time value))
     (t (icalsync-cl-coerce-null-pointer value))))
+
+(defun icalsync-cl-task->plist (task)
+  "Convert a CalTask to a plist of properties. The list of properties
+    is described by *task-properties*."
+  (loop
+     for property in *task-properties*
+     for value = (funcall (intern property "NEXTSTEP-FUNCTIONS") task)
+     append (list (intern (format nil "~:@(~a~)" property)) (icalsync-cl-coerce-value value))))
 
 (defun icalsync-cl-create-task (task-plist)
   (let ((title (getf task-plist :title))
@@ -76,5 +77,5 @@
         (setf (#/dueDate task) (nsclasp:time->ns-date scheduled)))
     
     (#/saveTask:error: calendar-store task (%null-ptr))
-    (ccl::lisp-string-from-nsstring (#/uid task))))
-
+    (list :uid (icalsync-cl-coerce-value (#/uid task))
+          :dt (icalsync-cl-coerce-value (#/dateStamp task)))))
